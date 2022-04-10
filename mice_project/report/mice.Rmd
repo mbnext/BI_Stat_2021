@@ -1,0 +1,154 @@
+---
+title: "Mice expression project"
+author: "Marianna Baranovskaia"
+date: "10 04 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data and imports
+
+Imports of the packages $readxl$, $dplyr$, $ggplot2$, $DESeq2$ are hidden. 
+``` {r imports, include=FALSE}
+if (!require("readxl", quietly = TRUE))
+    install.packages("readxl")
+
+if (!require("dplyr", quietly = TRUE))
+    install.packages("dplyr")
+
+if (!require("ggplot2", quietly = TRUE))
+    install.packages("ggplot2")
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+if (!require("DESeq2", quietly = TRUE))
+    BiocManager::install("DESeq2")
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(DESeq2)
+```
+
+``` {r data download}
+mice = read_xls("../data/Data_Cortex_Nuclear.xls")
+```
+
+``` {r data transform()}
+mice$Genotype = as.factor(mice$Genotype)
+mice$Treatment = as.factor(mice$Treatment)
+mice$Behavior = as.factor(mice$Behavior)
+mice$class = as.factor(mice$class)
+```
+
+## Data description
+### Description from the source 
+https://archive.ics.uci.edu/ml/datasets/Mice+Protein+Expression#
+
+####Abstract
+
+Expression levels of 77 proteins measured in the cerebral cortex of 8 classes of control and Down syndrome mice exposed to context fear conditioning, a task used to assess associative learning.
+
+####Data Set Information
+
+The data set consists of the expression levels of 77 proteins/protein modifications that produced detectable signals in the nuclear fraction of cortex. There are 38 control mice and 34 trisomic mice (Down syndrome), for a total of 72 mice. In the experiments, 15 measurements were registered of each protein per sample/mouse. Therefore, for control mice, there are 38x15, or 570 measurements, and for trisomic mice, there are 34x15, or 510 measurements. The dataset contains a total of 1080 measurements per protein. Each measurement can be considered as an independent sample/mouse.
+The eight classes of mice are described based on features such as genotype, behavior and treatment. According to genotype, mice can be control or trisomic. According to behavior, some mice have been stimulated to learn (context-shock) and others have not (shock-context) and in order to assess the effect of the drug memantine in recovering the ability to learn in trisomic mice, some mice have been injected with the drug and others have not.
+
+####Classes
+
+c-CS-s: control mice, stimulated to learn, injected with saline (9 mice)
+
+c-CS-m: control mice, stimulated to learn, injected with memantine (10 mice)
+
+c-SC-s: control mice, not stimulated to learn, injected with saline (9 mice)
+
+c-SC-m: control mice, not stimulated to learn, injected with memantine (10 mice)
+
+t-CS-s: trisomy mice, stimulated to learn, injected with saline (7 mice)
+
+t-CS-m: trisomy mice, stimulated to learn, injected with memantine (9 mice)
+
+t-SC-s: trisomy mice, not stimulated to learn, injected with saline (9 mice)
+
+t-SC-m: trisomy mice, not stimulated to learn, injected with memantine (9 mice)
+
+The aim is to identify subsets of proteins that are discriminant between the classes.
+
+####Attribute Information
+
+1 Mouse ID
+
+2..78 Values of expression levels of 77 proteins; the names of proteins are followed by "_n" indicating that they were measured in the nuclear fraction. For example: DYRK1A_n
+
+79 Genotype: control (c) or trisomy (t)
+
+80 Treatment type: memantine (m) or saline (s)
+
+81 Behavior: context-shock (CS) or shock-context (SC)
+
+82 Class: c-CS-s, c-CS-m, c-SC-s, c-SC-m, t-CS-s, t-CS-m, t-SC-s, t-SC-m 
+
+
+### Descriptional statistics
+Summary:
+``` {r descr01}
+summary(mice)
+```
+There are 1080 of the rows in the dataset. 
+``` {r descr02}
+ncol(mice) - 5
+```
+5 columns describe nominative variables (MouseID, Genotype, Treatment, Behavior, class) and 77 columns contains numeric variables.
+
+NA's:
+``` {r descr03}
+apply(X = is.na(mice), MARGIN = 2, FUN = sum)
+```
+``` {r descr04}
+print(max(apply(X = is.na(mice), MARGIN = 2, FUN = sum)))
+print(1080-max(apply(X = is.na(mice), MARGIN = 2, FUN = sum)))
+```
+NA max - 285, and 795 of the rows do not contain the NA. 
+
+There are 7 classes in the $class$ column: c-CS-m (150), c-SC-m (150), c-CS-s (135), c-SC-s (135), t-CS-m (135), t-SC-m (135) and  Other (240).
+The numbers of rows for the classes are not equal but the difference is not more than 2 times and I think these classes are balanced (let's try) 
+In the columns with genotype, treatment and behavior there are 2 classes in every column, which numbers are similar.
+
+Before the analysis I have replaced NA's in the columns for the column mean values.
+``` {r descr05}
+mice[2:78] <- data.frame(sapply(mice[2:78], function(x) ifelse(is.na(x), mean(x, na.rm = TRUE), x)))
+apply(X = is.na(mice), MARGIN = 2, FUN = sum)
+```
+No NA now
+
+## Does the BDNF_N expression differ dependent on the class?
+```{r anova00}
+shapiro.test(mice$BDNF_N)
+qqnorm(mice$BDNF_N)
+qqline(mice$BDNF_N)
+```
+According to the Shapiro-Wilk test, the data are not distributed normally (p-value is less than 0.05 and H0 (the distribution is normal) should be rejected). But according to the QQ-plot we can see some outliers but in general the points are near to the theoretical line. Let's try to do ANOVA, maybe it will be OK. 
+
+One-way ANOVA
+```{r anova01}
+oneway_BDNF_N <- aov(BDNF_N ~ class, data = mice)
+summary(oneway_BDNF_N)
+```
+P-value is <2e-16 (less than 0.05), so we can reject the null hypothesis (that there are no differences in the expression in different classes).
+
+## Linear model to predict the ERBB4_N expression depending on the other proteins level.  
+
+The big one:
+```{r lm01}
+lm_ERBB4_N_all <- lm(ERBB4_N ~ DYRK1A_N + ITSN1_N + BDNF_N + NR1_N + NR2A_N + pAKT_N + pBRAF_N + pCAMKII_N + pCREB_N + pELK_N + pERK_N + pJNK_N + PKCA_N + pMEK_N + pNR1_N + pNR2A_N + pNR2B_N + pPKCAB_N + pRSK_N + AKT_N + BRAF_N + CAMKII_N + CREB_N + ELK_N + ERK_N + GSK3B_N + JNK_N + MEK_N + TRKA_N + RSK_N + APP_N + Bcatenin_N + SOD1_N + MTOR_N + P38_N + pMTOR_N + DSCR1_N + AMPKA_N + NR2B_N + pNUMB_N + RAPTOR_N + TIAM1_N + pP70S6_N + NUMB_N + P70S6_N + pGSK3B_N + pPKCG_N + CDK5_N + S6_N + ADARB1_N + AcetylH3K9_N + RRP1_N + BAX_N + ARC_N + nNOS_N + Tau_N + GFAP_N + GluR3_N + GluR4_N + IL1B_N + P3525_N + pCASP9_N + PSD95_N + SNCA_N + Ubiquitin_N + pGSK3B_Tyr216_N + SHH_N + BAD_N + BCL2_N + pS6_N + pCFOS_N + SYP_N + H3AcK18_N + EGR1_N + H3MeK4_N + CaNA_N, mice)
+
+summary(lm_ERBB4_N_all)
+```
+Adjusted R-squared is 0.8032, not very good result. There are 76 of predictors and this model seems to be "over-predicted" because it is highly likely that only several predictors describe the most variance. It seems to be that we need to reduce the dimensions of the model.
+
+## PCA 
+Not today =)
